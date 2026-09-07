@@ -1,33 +1,32 @@
-YAML
 name: Musinsa Tracker
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # 5분마다 실행 (GitHub 최소 권장 주기)
-  workflow_dispatch:       # 수동 실행 버튼 생성
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
 
 jobs:
   track-prices:
     runs-on: ubuntu-latest
     steps:
-      - name: 코드 가져오기
+      - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: 파이썬 세팅
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
-      - name: 라이브러리 설치
+      - name: Install Dependencies
         run: |
           pip install -r requirements.txt
 
-      - name: 스크래퍼 실행
+      - name: Run Scraper
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: python action_scraper.py
 
-      - name: 변경된 가격 데이터 GitHub에 업데이트 (Commit & Push)
+      - name: Commit and Push
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
