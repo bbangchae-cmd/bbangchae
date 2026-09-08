@@ -24,4 +24,4 @@ jobs:
       - name: 파이썬(App.py) 자동 실행 🚀
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python App.py
+        run: python app.py
