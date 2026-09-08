@@ -1,90 +1,64 @@
-Python
-from flask import Flask, render_template, request, jsonify
-import json
-import os
-import re
+import cloudscraper
 import requests
-from bs4 import BeautifulSoup
-import threading
+import json
+import re
+import os
 
-app = Flask(__name__)
+# 1. 설정값 (본인의 워커 주소와 디스코드 웹훅 입력)
+WORKER_URL = "https://musinsa-tracker.bbangchae.workers.dev"
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "여기에_디스코드_웹훅_주소_입력")
 
-# 무신사 쿠키 설정
-RAW_COOKIE_STRING = """여기에_무신사_로그인_쿠키를_붙여넣으세요"""
-def parse_cookie_string(raw_cookie: str) -> dict:
-    cookies = {}
-    if not raw_cookie or "여기에_" in raw_cookie: return cookies
-    for item in raw_cookie.strip().split(';'):
-        if '=' in item:
-            k, v = item.strip().split('=', 1)
-            cookies[k.strip()] = v.strip()
-    return cookies
-MY_MUSINSA_COOKIES = parse_cookie_string(RAW_COOKIE_STRING)
-
-# 데이터베이스
-DATA_FILE = "tracking_items.json"
-db_lock = threading.Lock()
-TRACKING_ITEMS = []
-TRACKING_RUNNING = False # GitHub Actions가 추적하므로 여기선 상태만 표시
-
-def load_items_from_file():
-    global TRACKING_ITEMS, TRACKING_RUNNING
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                TRACKING_ITEMS = data.get("items", [])
-                TRACKING_RUNNING = data.get("is_tracking", False)
-        except: pass
-
-def save_items_to_file():
+def scrape_musinsa(goods_id):
+    # 🚀 핵심: 일반 requests가 아닌 cloudscraper를 사용하여 봇 차단 완벽 우회
+    scraper = cloudscraper.create_scraper(browser={'browser': 'chrome', 'platform': 'windows', 'mobile': False})
+    url = f"https://www.musinsa.com/app/goods/{goods_id}"
+    
     try:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump({"is_tracking": TRACKING_RUNNING, "items": TRACKING_ITEMS}, f, ensure_ascii=False, indent=2)
-    except Exception as e: print(f"저장 오류: {e}")
+        response = scraper.get(url)
+        html = response.text
+        
+        # 정규식으로 가격 데이터 추출
+        norm_match = re.search(r'"normalPrice"\s*:\s*(\d+)', html)
+        sale_match = re.search(r'"salePrice"\s*:\s*(\d+)', html)
+        
+        origin_price = int(norm_match.group(1)) if norm_match else 0
+        current_price = int(sale_match.group(1)) if sale_match else 0
+        
+        if origin_price == 0 and current_price == 0:
+            return None # 긁어오기 실패 시 5만원이 아닌 None 반환 (기존 가격 보호)
+            
+        return current_price
+    except Exception as e:
+        print(f"[오류] 상품 {goods_id} 스크래핑 실패: {e}")
+        return None
 
-load_items_from_file()
+def main():
+    print("🔍 클라우드플레어 워커에서 추적 목록을 가져옵니다...")
+    try:
+        # 기존에 만든 클라우드플레어 API에서 데이터 읽어오기
+        res = requests.get(f"{WORKER_URL}/api/items")
+        data = res.json()
+        items = data.get("items", [])
+    except Exception as e:
+        print("목록을 불러올 수 없습니다.", e)
+        return
 
-# 무신사 크롤러 (아이템 추가할 때 한 번 정보 가져오는 용도)
-class MusinsaCrawler:
-    def __init__(self, cookies_dict=None):
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Referer": "https://www.musinsa.com/"
-        })
-        if cookies_dict: self.session.cookies.update(cookies_dict)
+    for item in items:
+        if not item.get("is_tracking"):
+            continue
 
-    def extract_goods_no(self, query: str) -> str:
-        match = re.findall(r'\d+', str(query))
-        return match[0] if match else ""
-
-    def get_goods_info(self, goods_no: str):
-        # (기존 get_goods_info 및 _scrape_html_page 등 크롤링 로직을 그대로 유지합니다)
-        # 내용이 길어 생략하지만, 기존 코드의 해당 함수 내용을 그대로 쓰시면 됩니다.
-        pass
-
-crawler = MusinsaCrawler(cookies_dict=MY_MUSINSA_COOKIES)
-
-# API 라우트
-@app.route("/")
-def dashboard():
-    return render_template("index.html")
-
-@app.route("/api/items", methods=["GET"])
-def get_items():
-    load_items_from_file() # 화면 새로고침 시 최신 JSON 읽어오기
-    with db_lock:
-        return jsonify({"items": TRACKING_ITEMS, "is_tracking_global": TRACKING_RUNNING, "has_cookie": bool(MY_MUSINSA_COOKIES)})
-
-@app.route("/api/items/add", methods=["POST"])
-def add_item():
-    query = request.json.get("query", "").strip()
-    goods_no = crawler.extract_goods_no(query)
-    # (기존 add_item 로직 그대로 유지)
-    return jsonify({"success": True})
-
-# (기존 update_target, mark_notified, delete_items, toggle_tracking API 모두 유지)
+        print(f"[{item['brand']}] {item['title']} 가격 확인 중...")
+        current_price = scrape_musinsa(item["id"])
+        
+        if current_price and current_price > 0:
+            print(f" - 현재 정확한 가격: {current_price:,}원 (희망가: {item['target_price']:,}원)")
+            
+            # 목표가 도달 시 디스코드 알림 발송
+            if current_price <= item["target_price"]:
+                if not item.get("discord_notified"):
+                    msg = f"🎯 **[무신사 목표가 달성!]**\n• 상품명: {item['title']}\n• 현재가: **{current_price:,}원** (희망가: {item['target_price']:,}원)\n{item['url']}"
+                    requests.post(DISCORD_WEBHOOK, json={"content": msg})
+                    print(" 🚀 디스코드 알림 발송 완료!")
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000, use_reloader=False)
+    main()
