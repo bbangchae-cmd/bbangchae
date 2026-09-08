@@ -1,35 +1,27 @@
-name: Musinsa Tracker
+name: 무신사 자동 추적기
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch:
+    - cron: '*/5 * * * *' # 5분마다 자동으로 실행
+  workflow_dispatch: # 수동으로 버튼 눌러서 실행할 수 있는 기능
 
 jobs:
-  track-prices:
-    runs-on: ubuntu-latest
+  run-tracker:
+    runs-on: ubuntu-latest # 깃허브의 무료 리눅스 서버를 빌려 씁니다
+
     steps:
-      - name: Checkout Code
+      - name: 내 코드 가져오기
         uses: actions/checkout@v3
 
-      - name: Setup Python
+      - name: 파이썬 설치하기
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: '3.10'
 
-      - name: Install Dependencies
-        run: |
-          pip install -r requirements.txt
+      - name: 필요한 라이브러리 설치
+        run: pip install cloudscraper requests beautifulsoup4
 
-      - name: Run Scraper
+      - name: 파이썬(App.py) 자동 실행 🚀
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python action_scraper.py
-
-      - name: Commit and Push
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add tracking_items.json
-          git commit -m "Auto-update price data" || echo "No changes to commit"
-          git push
+        run: python App.py
